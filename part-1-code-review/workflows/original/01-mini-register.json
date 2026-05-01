@@ -1,0 +1,230 @@
+{
+  "name": "01 Mini Register",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mini-register",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "fa350cb8-ea25-418a-b328-02a822efe93f",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [
+        -768,
+        0
+      ],
+      "webhookId": "mini-register-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || {};\nconst email = (body.email || '').trim().toLowerCase();\nconst password = body.password || '';\nconst name = body.name || '';\n\nif (!email || !email.includes('@')) {\n  throw new Error('Invalid email');\n}\nif (password.length < 6) {\n  throw new Error('Password too short');\n}\nif (!name) {\n  throw new Error('Name required');\n}\n\nreturn [{ json: { email, password, name } }];"
+      },
+      "id": "4dcb5f48-c2bf-4430-ab37-bef5e4e3f6f6",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -128,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id FROM users WHERE email = '{{ $json.email }}' LIMIT 1",
+        "options": {}
+      },
+      "id": "f79e4bb1-1d96-4624-8756-ed7ca702cde9",
+      "name": "Check Email Exists",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        288,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const bcrypt = require('bcryptjs');\nconst password = $('Validate Input').first().json.password;\nconst hash = bcrypt.hashSync(password, 8);\nconst code = String(Math.floor(100000 + Math.random() * 900000));\nreturn [{ json: { password_hash: hash, code } }];"
+      },
+      "id": "32d756d1-a780-465d-8756-3fc0ea72f840",
+      "name": "Hash Password",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        704,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO users (email, password_hash) VALUES ('{{ $json.body.email }}', '{{ $json.password_hash }}') RETURNING id",
+        "options": {}
+      },
+      "id": "9a5f288e-d522-4dfc-a4f7-826143b8842d",
+      "name": "Insert User",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO verification_codes (user_id, code, expires_at) VALUES ('{{ $('Insert User').first().json.id }}', '{{ $('Hash Password').first().json.code }}', NOW() + INTERVAL '30 minutes')",
+        "options": {}
+      },
+      "id": "4c39f8bf-04f0-4f3e-9b21-587b028a8179",
+      "name": "Save Code",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        1296,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.sendgrid.com/v3/mail/send",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer <HARDCODED_SENDGRID_TOKEN_REDACTED>"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"personalizations\": [{ \"to\": [{ \"email\": \"{{ $('Validate Input').first().json.email }}\" }] }],\n  \"from\": { \"email\": \"noreply@example.com\" },\n  \"subject\": \"Your verification code\",\n  \"content\": [{ \"type\": \"text/plain\", \"value\": \"Your code: {{ $('Hash Password').first().json.code }}\" }]\n}",
+        "options": {}
+      },
+      "id": "a137bf27-a84b-46cb-a981-f1b281f3c83d",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1728,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": true, \"message\": \"Verification code sent\" }",
+        "options": {}
+      },
+      "id": "b05f30cf-de16-4cda-a462-b32aa56b25fe",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2224,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "Check Email Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Email Exists": {
+      "main": [
+        [
+          {
+            "node": "Hash Password",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hash Password": {
+      "main": [
+        [
+          {
+            "node": "Insert User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert User": {
+      "main": [
+        [
+          {
+            "node": "Save Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Code": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "91350b4b-0526-4eb7-88e8-862b6525da02",
+  "meta": {
+    "instanceId": "db57106b4a771a7fbc5e46a5ac3db767f46156e00ecd689ae3528d3bb11bcb19"
+  },
+  "id": "W7WLooYGZagBt7Xr",
+  "tags": []
+}

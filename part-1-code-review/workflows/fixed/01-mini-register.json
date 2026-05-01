@@ -1,0 +1,315 @@
+{
+  "name": "01 Mini Register",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mini-register",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "34044440-c582-4278-8924-bdc4b6433e16",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [
+        -160,
+        0
+      ],
+      "webhookId": "mini-register-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || {};\nconst email = (body.email || '').trim().toLowerCase();\nconst password = body.password || '';\nconst name = body.name || '';\n\nif (!email || !email.includes('@')) {\n  throw new Error('Invalid email');\n}\nif (password.length < 6) {\n  throw new Error('Password too short');\n}\nif (!name) {\n  throw new Error('Name required');\n}\n\nreturn [{ json: { email, password, name } }];"
+      },
+      "id": "ac425f99-ada7-4cb5-8134-ecb4d35d5598",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        64,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT EXISTS (\n  SELECT 1\n  FROM users\n  WHERE email = '{{ $json.email }}'\n) AS email_exists;",
+        "options": {}
+      },
+      "id": "fdb46222-5904-4044-b224-a66e91502612",
+      "name": "Check Email Exists",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        272,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YpU98VqHP19n0RtU",
+          "name": "Goodini Test DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const password = $('Validate Input').first().json.password;\n\nconst hash = `test_hash_${password}`;\nconst code = String(Math.floor(100000 + Math.random() * 900000));\n\nreturn [\n  {\n    json: {\n      password_hash: hash,\n      code,\n    },\n  },\n];"
+      },
+      "id": "1d138c3c-35c0-41d8-8d9b-5435724ea0e3",
+      "name": "Hash Password",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        688,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO users (email, password_hash, name)\nVALUES (\n  '{{ $(\"Validate Input\").first().json.email }}',\n  '{{ $json.password_hash }}',\n  '{{ $(\"Validate Input\").first().json.name }}'\n)\nRETURNING id;",
+        "options": {}
+      },
+      "id": "f348aa13-7b54-4f04-863f-f72f8bdbcdf4",
+      "name": "Insert User",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        880,
+        128
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YpU98VqHP19n0RtU",
+          "name": "Goodini Test DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO verification_codes (user_id, code, expires_at) VALUES ('{{ $('Insert User').first().json.id }}', '{{ $('Hash Password').first().json.code }}', NOW() + INTERVAL '30 minutes')",
+        "options": {}
+      },
+      "id": "33826c19-4cce-4395-a5b7-85e280195564",
+      "name": "Save Code",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        1072,
+        128
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YpU98VqHP19n0RtU",
+          "name": "Goodini Test DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.sendgrid.com/v3/mail/send",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.SENDGRID_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"personalizations\": [{ \"to\": [{ \"email\": \"{{ $('Validate Input').first().json.email }}\" }] }],\n  \"from\": { \"email\": \"noreply@example.com\" },\n  \"subject\": \"Your verification code\",\n  \"content\": [{ \"type\": \"text/plain\", \"value\": \"Your code: {{ $('Hash Password').first().json.code }}\" }]\n}",
+        "options": {}
+      },
+      "id": "907a7213-35be-45a0-9d40-39a1c825cabb",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1264,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": true, \"message\": \"Verification code sent\" }",
+        "options": {}
+      },
+      "id": "a8443b8e-ca03-4485-b826-82c708862da1",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9bfa41fd-622c-44b2-a7df-528e7c7fc3f6",
+              "leftValue": "={{ $json.email_exists }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        0
+      ],
+      "id": "b89b7adf-0e6c-46c4-bb16-ca9e7b5f897a",
+      "name": "IF Email Exists"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"success\": false,\n  \"error\": \"Email already registered\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        688,
+        -96
+      ],
+      "id": "9496b0f2-17ac-4130-adc2-f1e24b57d72b",
+      "name": "Respond Email Exists"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "Check Email Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Email Exists": {
+      "main": [
+        [
+          {
+            "node": "IF Email Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hash Password": {
+      "main": [
+        [
+          {
+            "node": "Insert User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert User": {
+      "main": [
+        [
+          {
+            "node": "Save Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Code": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Email Exists": {
+      "main": [
+        [
+          {
+            "node": "Respond Email Exists",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Hash Password",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "98d9ff74-2e3d-4fb5-a220-a78cb6216c42",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "cbb4c5b1567579cad9ff29829e3df95c2bd14e347821adb462a57e302f42fee2"
+  },
+  "id": "QL8DLxPnykip6fMK",
+  "tags": []
+}
